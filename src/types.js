@@ -7,6 +7,7 @@
  * @property {*} [forkArgs]
  * @property {*} [forkOpts]
  * @property {number} [debugPortStart]
+ * @property {number} [maxJobsPerWorker]
  */
 
 /**

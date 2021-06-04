@@ -207,6 +207,7 @@ function WorkerHandler(script, _options) {
   this.script = script || getDefaultWorker();
   this.worker = setupWorker(this.script, options);
   this.debugPort = options.debugPort;
+  this.maxJobsPerWorker = options.maxJobsPerWorker || Infinity;
 
   // The ready message is only sent if the worker.add method is called (And the default script is not used)
   if (!script) {
@@ -298,6 +299,7 @@ function WorkerHandler(script, _options) {
   this.terminated = false;
   this.terminationHandler = null;
   this.lastId = 0;
+  this.handledJobCount = 0;
 }
 
 /**
@@ -338,6 +340,13 @@ WorkerHandler.prototype.exec = function(method, params, resolver, options) {
     params: params
   };
 
+  if (this.exhausted()) {
+    resolver.reject(new Error('Worker is exhausted'));
+  } else {
+    // Increment the handled job counter.
+    ++this.handledJobCount;
+  }
+
   if (this.terminated) {
     resolver.reject(new Error('Worker is terminated'));
   } else if (this.worker.ready) {
@@ -374,6 +383,14 @@ WorkerHandler.prototype.exec = function(method, params, resolver, options) {
  */
 WorkerHandler.prototype.busy = function () {
   return Object.keys(this.processing).length > 0;
+};
+
+/**
+ * Test whether the worker has handled the maximum allowed jobs or not
+ * @return {boolean} Returns true if the worker has handled the maximum allowed jobs
+ */
+ WorkerHandler.prototype.exhausted = function () {
+  return this.handledJobCount >= this.maxJobsPerWorker;
 };
 
 /**

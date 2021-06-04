@@ -29,6 +29,7 @@ function Pool(script, options) {
   this.nodeWorker = options.nodeWorker;
   this.workerType = options.workerType || options.nodeWorker || 'auto'
   this.maxQueueSize = options.maxQueueSize || Infinity;
+  this.maxJobsPerWorker = options.maxJobsPerWorker || Infinity;
 
   // configuration
   if (options && 'maxWorkers' in options) {
@@ -211,6 +212,10 @@ Pool.prototype._next = function () {
             if (worker.terminated) {
               return me._removeWorker(worker);
             }
+          }).then(function() { // Remove the worker if it is exhausted.
+            if (worker.exhausted()) {
+              return me._removeWorker(worker);
+            }
           }).then(function() {
             me._next(); // trigger next task in the queue
           });
@@ -237,11 +242,11 @@ Pool.prototype._next = function () {
  * @private
  */
 Pool.prototype._getWorker = function() {
-  // find a non-busy worker
+  // find a non-busy, non-exhausted worker
   var workers = this.workers;
   for (var i = 0; i < workers.length; i++) {
     var worker = workers[i];
-    if (worker.busy() === false) {
+    if (worker.busy() === false && worker.exhausted() === false) {
       return worker;
     }
   }
@@ -329,18 +334,22 @@ Pool.prototype.terminate = function (force, timeout) {
 
 /**
  * Retrieve statistics on tasks and workers.
- * @return {{totalWorkers: number, busyWorkers: number, idleWorkers: number, pendingTasks: number, activeTasks: number}} Returns an object with statistics
+ * @return {{totalWorkers: number, busyWorkers: number, exhaustedWorkers: number, idleWorkers: number, pendingTasks: number, activeTasks: number}} Returns an object with statistics
  */
 Pool.prototype.stats = function () {
   var totalWorkers = this.workers.length;
   var busyWorkers = this.workers.filter(function (worker) {
     return worker.busy();
   }).length;
+  var exhaustedWorkers = this.workers.filter(function (worker) {
+    return worker.exhausted();
+  }).length;
 
   return {
-    totalWorkers:  totalWorkers,
-    busyWorkers:   busyWorkers,
-    idleWorkers:   totalWorkers - busyWorkers,
+    totalWorkers:      totalWorkers,
+    busyWorkers:       busyWorkers,
+    exhaustedWorkers:   exhaustedWorkers,
+    idleWorkers:       totalWorkers - (busyWorkers + exhaustedWorkers),
 
     pendingTasks:  this.tasks.length,
     activeTasks:   busyWorkers
@@ -369,7 +378,8 @@ Pool.prototype._createWorkerHandler = function () {
     forkArgs: this.forkArgs,
     forkOpts: this.forkOpts,
     debugPort: DEBUG_PORT_ALLOCATOR.nextAvailableStartingAt(this.debugPortStart),
-    workerType: this.workerType
+    workerType: this.workerType,
+    maxJobsPerWorker: this.maxJobsPerWorker,
   });
 }
 
