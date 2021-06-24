@@ -36,7 +36,7 @@ function ensureWebWorker() {
 function tryRequireWorkerThreads() {
   try {
     return requireFoolWebpack('worker_threads');
-  } catch(error) {
+  } catch (error) {
     if (typeof error === 'object' && error !== null && error.code === 'MODULE_NOT_FOUND') {
       // no worker_threads available (old version of node.js)
       return null;
@@ -58,7 +58,7 @@ function getDefaultWorker() {
     }
 
     // use embedded worker.js
-    var blob = new Blob([require('./generated/embeddedWorker')], {type: 'text/javascript'});
+    var blob = new Blob([require('./generated/embeddedWorker')], { type: 'text/javascript' });
     return window.URL.createObjectURL(blob);
   }
   else {
@@ -116,16 +116,16 @@ function setupWorkerThreadWorker(script, WorkerThreads) {
   });
   worker.isWorkerThread = true;
   // make the worker mimic a child_process
-  worker.send = function(message) {
+  worker.send = function (message) {
     this.postMessage(message);
   };
 
-  worker.kill = function() {
+  worker.kill = function () {
     this.terminate();
     return true;
   };
 
-  worker.disconnect = function() {
+  worker.disconnect = function () {
     this.terminate();
   };
 
@@ -161,7 +161,7 @@ function resolveForkOptions(opts) {
     }
   }
 
-  process.execArgv.forEach(function(arg) {
+  process.execArgv.forEach(function (arg) {
     if (arg.indexOf('--max-old-space-size') > -1) {
       execArgv.push(arg)
     }
@@ -171,7 +171,7 @@ function resolveForkOptions(opts) {
     forkArgs: opts.forkArgs,
     forkOpts: Object.assign({}, opts.forkOpts, {
       execArgv: (opts.forkOpts && opts.forkOpts.execArgv || [])
-      .concat(execArgv)
+        .concat(execArgv)
     })
   });
 }
@@ -181,7 +181,7 @@ function resolveForkOptions(opts) {
  * @param {Object} obj Error that has been serialized and parsed to object
  * @return {Error} The equivalent Error.
  */
-function objectToError (obj) {
+function objectToError(obj) {
   var temp = new Error('')
   var props = Object.keys(obj)
 
@@ -267,9 +267,8 @@ function WorkerHandler(script, _options) {
   }
 
   // send all queued requests to worker
-  function dispatchQueuedRequests()
-  {
-    for(const request of me.requestQueue.splice(0)) {
+  function dispatchQueuedRequests() {
+    for (const request of me.requestQueue.splice(0)) {
       me.worker.send(request);
     }
   }
@@ -283,8 +282,8 @@ function WorkerHandler(script, _options) {
     message += '    exitCode: `' + exitCode + '`\n';
     message += '    signalCode: `' + signalCode + '`\n';
 
-    message += '    workerpool.script: `' +  me.script + '`\n';
-    message += '    spawnArgs: `' +  worker.spawnargs + '`\n';
+    message += '    workerpool.script: `' + me.script + '`\n';
+    message += '    spawnArgs: `' + worker.spawnargs + '`\n';
     message += '    spawnfile: `' + worker.spawnfile + '`\n'
 
     message += '    stdout: `' + worker.stdout + '`\n'
@@ -318,7 +317,7 @@ WorkerHandler.prototype.methods = function () {
  * @param {ExecOptions}  [options]
  * @return {Promise.<*, Error>} result
  */
-WorkerHandler.prototype.exec = function(method, params, resolver, options) {
+WorkerHandler.prototype.exec = function (method, params, resolver, options) {
   if (!resolver) {
     resolver = Promise.defer();
   }
@@ -366,9 +365,9 @@ WorkerHandler.prototype.exec = function(method, params, resolver, options) {
 
       // terminate worker
       return me.terminateAndNotify(true)
-        .then(function() {
+        .then(function () {
           throw error;
-        }, function(err) {
+        }, function (err) {
           throw err;
         });
     } else {
@@ -389,7 +388,7 @@ WorkerHandler.prototype.busy = function () {
  * Test whether the worker has handled the maximum allowed jobs or not
  * @return {boolean} Returns true if the worker has handled the maximum allowed jobs
  */
- WorkerHandler.prototype.exhausted = function () {
+WorkerHandler.prototype.exhausted = function () {
   return this.handledJobCount >= this.maxJobsPerWorker;
 };
 
@@ -418,7 +417,7 @@ WorkerHandler.prototype.terminate = function (force, callback) {
   }
   if (!this.busy()) {
     // all tasks are finished. kill the worker
-    var cleanup = function(err) {
+    var cleanup = function (err) {
       me.terminated = true;
       if (me.worker != null && me.worker.removeAllListeners) {
         // removeAllListeners is only available for child_process
@@ -441,13 +440,17 @@ WorkerHandler.prototype.terminate = function (force, callback) {
         }
 
         if (this.worker.isChildProcess) {
-          var cleanExitTimeout = setTimeout(function() {
-            me.worker.kill();
+          var cleanExitTimeout = setTimeout(function () {
+            if (me.worker) {
+              me.worker.kill();
+            }
           }, CHILD_PROCESS_EXIT_TIMEOUT);
 
-          this.worker.once('exit', function() {
+          this.worker.once('exit', function () {
             clearTimeout(cleanExitTimeout);
-            me.worker.killed = true;
+            if (me.worker) {
+              me.worker.killed = true;
+            }
             cleanup();
           });
 
@@ -495,7 +498,7 @@ WorkerHandler.prototype.terminateAndNotify = function (force, timeout) {
   if (timeout) {
     resolver.promise.timeout = timeout;
   }
-  this.terminate(force, function(err, worker) {
+  this.terminate(force, function (err, worker) {
     if (err) {
       resolver.reject(err);
     } else {
