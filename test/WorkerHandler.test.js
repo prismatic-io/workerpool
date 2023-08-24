@@ -121,6 +121,16 @@ describe('WorkerHandler', function () {
     assert.strictEqual(handler.terminated, true);
   });
 
+  it('should terminate before the worker is ready', function (done) {
+    var handler = new WorkerHandler(__dirname + '/workers/async.js', { workerType: 'process' });
+    handler.terminate(true);
+    assert.strictEqual(handler.requestQueue[0].message, '__workerpool-terminate__');
+    setTimeout(function () {
+      assert.strictEqual(handler.terminated, true);
+      done();
+    }, 100);
+  });
+
   it('handle a promise based result', function (done) {
     var handler = new WorkerHandler();
 
@@ -471,6 +481,34 @@ describe('WorkerHandler', function () {
       const worker = handler.worker;
       handler.terminate(true, () => {
         worker.emit('message', 'ready');
+        done();
+      });
+    });
+  });
+
+  describe('terminateAndNotify', function () {
+
+    it('promise should be resolved on termination', function (done) {
+      var handler = new WorkerHandler(__dirname + '/workers/async.js');
+
+      handler.terminateAndNotify(true)
+      .then(function () {
+        done();
+      }).catch(function (err) {
+        assert('Promise should not be rejected');
+      });
+    });
+
+    it('promise should be rejected if notify timeout is smaller than worker timeout', function (done) {
+      var handler = new WorkerHandler(__dirname + '/workers/async.js', {
+        workerTerminateTimeout: 100
+      });
+
+      handler.terminateAndNotify(true, 50)
+      .then(function () {
+        assert('Promise should not be resolved');
+      }).catch(function (err) {
+        assert.ok(err instanceof Promise.TimeoutError);
         done();
       });
     });

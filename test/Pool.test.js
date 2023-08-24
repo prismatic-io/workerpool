@@ -9,13 +9,26 @@ function add(a, b) {
 
 describe('Pool', function () {
 
+  // Creating pool with this function ensures that the pool is terminated
+  // at the end of the test, which avoid hanging the test suite if terminate()
+  // hadn't been called for some reasons
+  function createPool(script, options) {
+    var pool = new Pool(script, options);
+
+    after(() => {
+      return pool.terminate();
+    });
+
+    return pool;
+  }
+
   describe('nodeWorker', function() {
     function add(a,b) {
       return a+b;
     }
 
     it('supports process', function() {
-      var pool = new Pool({ workerType: 'process' });
+      var pool = createPool({ workerType: 'process' });
 
       return pool.exec(add, [3, 4])
           .then(function (result) {
@@ -28,7 +41,7 @@ describe('Pool', function () {
     var WorkerThreads = tryRequire('worker_threads');
 
     it('supports auto', function() {
-      var pool = new Pool({ workerType: 'auto' });
+      var pool = createPool({ workerType: 'auto' });
       var promise = pool.exec(add, [3, 4]);
       assert.strictEqual(pool.workers.length, 1);
       var worker = pool.workers[0].worker;
@@ -48,7 +61,7 @@ describe('Pool', function () {
 
     if (WorkerThreads) {
       it('supports thread', function() {
-        var pool = new Pool({ workerType: 'thread' });
+        var pool = createPool({ workerType: 'thread' });
         var promise = pool.exec(add, [3, 4]);
 
         assert.strictEqual(pool.workers.length, 1);
@@ -61,17 +74,112 @@ describe('Pool', function () {
           return pool.terminate();
         });
       });
+
+      it('supports passing options to threads', function() {
+        const maxYoungGenerationSizeMb = 200
+        var pool = createPool({ minWorkers:1, workerType: 'thread', workerThreadOpts: { resourceLimits: { maxYoungGenerationSizeMb } } });
+        var worker = pool.workers[0].worker;
+
+        assert.strictEqual(worker.isWorkerThread, true);
+        assert.strictEqual(worker.resourceLimits.maxYoungGenerationSizeMb, maxYoungGenerationSizeMb);
+      });
     } else {
       it('errors when not supporting worker thread', function() {
         assert.throws(function() {
-          new Pool({ workerType: 'thread' });
+          createPool({ workerType: 'thread' });
         }, /WorkerPool: workerType = 'thread' is not supported, Node >= 11\.7\.0 required/)
       });
     }
   })
 
+  it('supports forkOpts parameter to pass options to fork', function() {
+    var pool = createPool({ workerType: 'process', forkOpts: { env: { TEST_ENV: 'env_value'} } });
+    function getEnv() {
+      return process.env.TEST_ENV;
+    }
+
+    return pool.exec(getEnv, [])
+        .then(function (result) {
+          assert.strictEqual(result, 'env_value');
+
+          return pool.terminate();
+        });
+  });
+
+  it('supports worker creation hook to pass dynamic options to fork (for example)', function() {
+    var counter = 0;
+    var terminatedWorkers = [];
+    var pool = createPool({
+      workerType: 'process',
+      maxWorkers: 4, // make sure we can create enough workers (otherwise we could be limited by the number of CPUs)
+      onCreateWorker: (opts) => {
+        return {...opts, forkOpts: {...opts.forkOpts, env: { TEST_ENV: `env_value${counter++}` }}}
+      },
+      onTerminateWorker: (opts) => {
+        terminatedWorkers.push(opts.forkOpts.env.TEST_ENV);
+      }
+    });
+
+    function getEnv() {
+      return process.env.TEST_ENV;
+    }
+
+    return Promise.all([
+      pool.exec(getEnv, []),
+      pool.exec(getEnv, []),
+      pool.exec(getEnv, [])
+    ]).then(function (result) {
+      assert.strictEqual(result.length, 3, 'The creation hook should be called 3 times');
+      assert(result.includes('env_value0'), 'result should include the value with counter = 0');
+      assert(result.includes('env_value1'), 'result should include the value with counter = 1');
+      assert(result.includes('env_value2'), 'result should include the value with counter = 2');
+      return pool.terminate();
+    }).then(function () {
+      assert.strictEqual(terminatedWorkers.length, 3, 'The termination hook should be called 3 times');
+      assert(terminatedWorkers.includes('env_value0'), 'terminatedWorkers should include the value with counter = 0');
+      assert(terminatedWorkers.includes('env_value1'), 'terminatedWorkers should include the value with counter = 1');
+      assert(terminatedWorkers.includes('env_value2'), 'terminatedWorkers should include the value with counter = 2');
+    });
+  });
+
+  it('supports worker creation hook to pass dynamic options to threads (for example)', function() {
+    var counter = 0;
+    var terminatedWorkers = [];
+    var pool = createPool({
+      workerType: 'thread',
+      maxWorkers: 4, // make sure we can create enough workers (otherwise we could be limited by the number of CPUs)
+      onCreateWorker: (opts) => {
+        return {...opts, workerThreadOpts: {...opts.workerThreadOpts, env: { TEST_ENV: `env_value${counter++}` }}}
+      },
+      onTerminateWorker: (opts) => {
+        terminatedWorkers.push(opts.workerThreadOpts.env.TEST_ENV);
+      }
+    });
+
+    function getEnv() {
+      return process.env.TEST_ENV;
+    }
+
+    return Promise.all([
+      pool.exec(getEnv, []),
+      pool.exec(getEnv, []),
+      pool.exec(getEnv, [])
+    ]).then(function (result) {
+      assert.strictEqual(result.length, 3, 'The creation hook should be called 3 times');
+      assert(result.includes('env_value0'), 'result should include the value with counter = 0');
+      assert(result.includes('env_value1'), 'result should include the value with counter = 1');
+      assert(result.includes('env_value2'), 'result should include the value with counter = 2');
+      return pool.terminate();
+    }).then(function () {
+      assert.strictEqual(terminatedWorkers.length, 3, 'The termination hook should be called 3 times');
+      assert(terminatedWorkers.includes('env_value0'), 'terminatedWorkers should include the value with counter = 0');
+      assert(terminatedWorkers.includes('env_value1'), 'terminatedWorkers should include the value with counter = 1');
+      assert(terminatedWorkers.includes('env_value2'), 'terminatedWorkers should include the value with counter = 2');
+    });
+  });
+
   it('should offload a function to a worker', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function add(a, b) {
       return a + b;
@@ -95,7 +203,7 @@ describe('Pool', function () {
   });
 
   it('should offload functions to multiple workers', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function add(a, b) {
       return a + b;
@@ -119,7 +227,7 @@ describe('Pool', function () {
   });
 
   it('should put tasks in queue when all workers are busy', function (done) {
-    var pool = new Pool({maxWorkers: 2});
+    var pool = createPool({maxWorkers: 2});
 
     function add(a, b) {
       return a + b;
@@ -157,7 +265,7 @@ describe('Pool', function () {
   });
 
   it('should create a proxy', function (done) {
-    var pool = new Pool();
+    var pool = createPool();
 
     pool.proxy().then(function (proxy) {
       assert.deepStrictEqual(Object.keys(proxy).sort(), ['methods', 'run']);
@@ -176,7 +284,7 @@ describe('Pool', function () {
   });
 
   it('should create a proxy of a custom worker', function (done) {
-    var pool = new Pool(__dirname + '/workers/simple.js');
+    var pool = createPool(__dirname + '/workers/simple.js');
 
     pool.proxy().then(function (proxy) {
       assert.deepStrictEqual(Object.keys(proxy).sort(), ['add','methods','multiply','run','timeout']);
@@ -187,7 +295,7 @@ describe('Pool', function () {
   });
 
   it('should invoke a method via a proxy', function (done) {
-    var pool = new Pool(__dirname + '/workers/simple.js');
+    var pool = createPool(__dirname + '/workers/simple.js');
 
     pool.proxy().then(function (proxy) {
       proxy.multiply(4, 3)
@@ -205,7 +313,7 @@ describe('Pool', function () {
   });
 
   it('should invoke an async method via a proxy', function (done) {
-    var pool = new Pool(__dirname + '/workers/simple.js');
+    var pool = createPool(__dirname + '/workers/simple.js');
 
     pool.proxy().then(function (proxy) {
       proxy.timeout(100)
@@ -223,7 +331,7 @@ describe('Pool', function () {
   });
 
   it('should handle errors thrown by a worker', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function test() {
       throw new TypeError('Test error');
@@ -240,7 +348,7 @@ describe('Pool', function () {
   });
 
   it('should execute a function returning a Promise', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function testAsync() {
       return Promise.resolve('done');
@@ -259,7 +367,7 @@ describe('Pool', function () {
   });
 
   it('should propagate a rejected Promise', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function testAsync() {
       return Promise.reject(new Error('I reject!'));
@@ -278,7 +386,7 @@ describe('Pool', function () {
   });
 
   it('should cancel a task', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function forever() {
       while (1 > 0) {} // runs forever
@@ -303,7 +411,7 @@ describe('Pool', function () {
   });
 
   it('should cancel a queued task', function (done) {
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
     var reachedTheEnd = false;
 
     function delayed() {
@@ -349,7 +457,7 @@ describe('Pool', function () {
 
   it('should run following tasks if a previous queued task is cancelled', function (done) {
 
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
     var reachedTheEnd = false;
 
     function delayed() {
@@ -427,7 +535,7 @@ describe('Pool', function () {
     // TODO: test whether a task in the queue can be neatly cancelled
 
   it('should timeout a task', function () {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     function forever() {
       while (1 > 0) {} // runs forever
@@ -447,7 +555,7 @@ describe('Pool', function () {
   });
 
   it('should start timeout timer of a task once the task is taken from the queue (1)', function (done) {
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
     var delay = 50
 
     function sleep() {
@@ -485,7 +593,7 @@ describe('Pool', function () {
   });
 
   it('should start timeout timer of a task once the task is taken from the queue (2)', function (done) {
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
     var delay = 50
 
     function sleep() {
@@ -513,7 +621,7 @@ describe('Pool', function () {
   });
 
   it('should handle crashed workers (1)', function () {
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
 
     var promise = pool.exec(add)
       .then(function () {
@@ -538,13 +646,6 @@ describe('Pool', function () {
         assert.strictEqual(pool.workers.length, 1);
 
         return pool.terminate();
-      })
-      .catch(function (err) {
-        // Promise library lacks a "finally"
-        return pool.terminate()
-          .then(function() {
-            return err;
-          });
       });
 
     assert.strictEqual(pool.workers.length, 1);
@@ -561,24 +662,24 @@ describe('Pool', function () {
 
     it('should throw an error on invalid type or number of maxWorkers', function () {
       assert.throws(function () {
-        new Pool({maxWorkers: 'a string'});
+        createPool({maxWorkers: 'a string'});
       }, TypeError);
 
       assert.throws(function () {
-        new Pool({maxWorkers: 2.5});
+        createPool({maxWorkers: 2.5});
       }, TypeError);
 
       assert.throws(function () {
-        new Pool({maxWorkers: 0});
+        createPool({maxWorkers: 0});
       }, TypeError);
 
       assert.throws(function () {
-        new Pool({maxWorkers: -1});
+        createPool({maxWorkers: -1});
       }, TypeError);
     });
 
     it('should limit to the configured number of max workers', function () {
-      var pool = new Pool({maxWorkers: 2});
+      var pool = createPool({maxWorkers: 2});
 
       var tasks = [
         pool.exec(add, [1, 2]),
@@ -598,7 +699,7 @@ describe('Pool', function () {
     });
 
     it('should take number of cpus minus one as default maxWorkers', function () {
-      var pool = new Pool();
+      var pool = createPool();
 
       var cpus = require('os').cpus();
       assert.strictEqual(pool.maxWorkers, cpus.length - 1);
@@ -608,20 +709,20 @@ describe('Pool', function () {
 
     it('should throw an error on invalid type or number of minWorkers', function () {
       assert.throws(function () {
-        new Pool({minWorkers: 'a string'});
+        createPool({minWorkers: 'a string'});
       }, TypeError);
 
       assert.throws(function () {
-        new Pool({minWorkers: 2.5});
+        createPool({minWorkers: 2.5});
       }, TypeError);
 
       assert.throws(function () {
-        new Pool({maxWorkers: -1});
+        createPool({maxWorkers: -1});
       }, TypeError);
     });
 
     it('should create number of cpus minus one when minWorkers set to \'max\'', function () {
-      var pool = new Pool({minWorkers:'max'});
+      var pool = createPool({minWorkers:'max'});
 
       var cpus = require('os').cpus();
       assert.strictEqual(pool.workers.length, cpus.length - 1);
@@ -630,17 +731,20 @@ describe('Pool', function () {
     });
 
     it('should increase maxWorkers to match minWorkers', function () {
-      var pool = new Pool({minWorkers: 16});
-
+      var cpus = require('os').cpus();
+      var count = cpus.length + 2;
+      var tasksCount = cpus.length * 2;
+      var pool = createPool({minWorkers: count});
+      
       var tasks = []
-      for(var i=0;i<20;i++) {
+      for(var i=0;i<tasksCount;i++) {
         tasks.push(pool.exec(add, [i, i*2]));
       }
 
-      assert.strictEqual(pool.minWorkers, 16);
-      assert.strictEqual(pool.maxWorkers, 16);
-      assert.strictEqual(pool.workers.length, 16);
-      assert.strictEqual(pool.tasks.length, 4);
+      assert.strictEqual(pool.minWorkers, count);
+      assert.strictEqual(pool.maxWorkers, count);
+      assert.strictEqual(pool.workers.length, count);
+      assert.strictEqual(pool.tasks.length, tasksCount - count);
 
       return Promise.all(tasks).then(function () {
         return pool.terminate();
@@ -653,7 +757,7 @@ describe('Pool', function () {
   });
 
   it('should clear all workers upon explicit termination', function (done) {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -681,7 +785,7 @@ describe('Pool', function () {
 
 
   it('should wait until subprocesses have ended', function (done) {
-    var pool = new Pool({maxWorkers: 10, workerType: 'process'});
+    var pool = createPool({maxWorkers: 10, workerType: 'process'});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -717,7 +821,7 @@ describe('Pool', function () {
   });
 
   it('should clear all workers after tasks are finished', function () {
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -742,7 +846,7 @@ describe('Pool', function () {
 
   it ('should wait for all workers if pool is terminated before multiple concurrent tasks are finished', function (done) {
 
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -799,7 +903,7 @@ describe('Pool', function () {
 
   it ('should wait for all workers if pool is terminated before tasks are finished, even if a task fails', function (done) {
 
-    var pool = new Pool({maxWorkers: 10});
+    var pool = createPool({maxWorkers: 10});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -843,7 +947,7 @@ describe('Pool', function () {
   });
 
   it ('should cancel any pending tasks when terminating a pool', function () {
-    var pool = new Pool({maxWorkers: 1});
+    var pool = createPool({maxWorkers: 1});
 
     assert.strictEqual(pool.workers.length, 0);
 
@@ -877,7 +981,7 @@ describe('Pool', function () {
   });
 
   it('should return statistics', function () {
-    var pool = new Pool({maxWorkers: 4});
+    var pool = createPool({maxWorkers: 4});
 
     function test() {
       return new Promise(function (resolve, reject) {
@@ -928,7 +1032,7 @@ describe('Pool', function () {
   });
 
   it('should throw an error in case of wrong type of arguments in function exec', function () {
-    var pool = new Pool();
+    var pool = createPool();
     assert.throws(function () {pool.exec()}, TypeError);
     assert.throws(function () {pool.exec(23)}, TypeError);
     assert.throws(function () {pool.exec(add, {})}, TypeError);
@@ -937,7 +1041,7 @@ describe('Pool', function () {
   });
 
   it('should throw an error when the tasks queue is full', function () {
-    var pool = new Pool({maxWorkers: 2, maxQueueSize: 3});
+    var pool = createPool({maxWorkers: 2, maxQueueSize: 3});
 
     function add(a, b) {
       return a + b;
@@ -977,7 +1081,7 @@ describe('Pool', function () {
   });
 
   it('should receive events from worker', function (done) {
-    var pool = new Pool(__dirname + '/workers/emit.js');
+    var pool = createPool(__dirname + '/workers/emit.js');
 
     var receivedEvent
 
@@ -1000,5 +1104,105 @@ describe('Pool', function () {
             assert('Should not throw an error');
             done(err);
           });
+  });
+
+  it('should support sending transferable object to worker', function (done) {
+    var pool = createPool(__dirname + '/workers/transfer-to.js');
+
+    var size = 8;
+    var uInt8Array = new Uint8Array(size).map((_v, i) => i);
+    pool.exec('transfer', [uInt8Array], {
+            transfer: [uInt8Array.buffer]
+          })
+          .then(function (result) {
+            assert.strictEqual(result, size);
+            // original buffer should be transferred thus empty
+            assert.strictEqual(uInt8Array.byteLength, 0);
+
+            pool.terminate();
+            done();
+          })
+          .catch(function (err) {
+            console.log(err);
+            assert('Should not throw an error');
+            done(err);
+          });
+  });
+
+  it('should support sending transferable object from worker', function (done) {
+    var pool = createPool(__dirname + '/workers/transfer-from.js');
+
+    var size = 8;
+    pool.exec('transfer', [size])
+          .then(function (result) {
+            assert.strictEqual(result.byteLength, size);
+            
+            pool.terminate();
+            done();
+          })
+          .catch(function (err) {
+            console.log(err);
+            assert('Should not throw an error');
+            done(err);
+          });
+  });
+
+  it('should call worker termination handler (worker_thread)', function () {
+    var pool = createPool(__dirname + '/workers/cleanup.js');
+
+    var handlerCalled = false;
+    var channel = new MessageChannel();
+    channel.port1.onmessage = function (event) {
+      assert.strictEqual(event.data, 0);
+      handlerCalled = true;
+    };
+
+    pool.exec('asyncAdd', [1, 2, channel.port2], {
+      transfer: [channel.port2],
+    });
+
+    return pool.terminate().then(function () {
+      assert(handlerCalled);
+    });
+  });
+
+  it('should call worker termination async handler (worker_thread)', function () {
+    var pool = createPool(__dirname + '/workers/cleanup-async.js');
+
+    var handlerCalled = false;
+    var channel = new MessageChannel();
+    channel.port1.onmessage = function (event) {
+      assert.strictEqual(event.data, 0);
+      handlerCalled = true;
+    };
+
+    pool.exec('asyncAdd', [1, 2, channel.port2], {
+      transfer: [channel.port2],
+    });
+
+    return pool.terminate().then(function () {
+      assert(handlerCalled);
+    });
+  });
+
+  it('should not call worker termination async handler after timeout', function () {
+    var pool = createPool(__dirname + '/workers/cleanup-async.js', {
+      workerTerminateTimeout: 1,
+    });
+
+    var handlerCalled = false;
+    var channel = new MessageChannel();
+    channel.port1.onmessage = function (event) {
+      assert.strictEqual(event.data, 0);
+      handlerCalled = true;
+    };
+
+    pool.exec('asyncAdd', [1, 2, channel.port2], {
+      transfer: [channel.port2],
+    });
+
+    return pool.terminate().then(function () {
+      assert(handlerCalled === false);
+    });
   });
 });

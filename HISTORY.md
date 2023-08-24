@@ -2,6 +2,54 @@
 https://github.com/josdejong/workerpool
 
 
+## 2023-08-21, version 6.4.2
+
+- Fix: a bug in the timeout of termination (#395, #387). Thanks @Michsior14.
+
+
+## 2023-08-17, version 6.4.1
+
+- Fix: worker termination before it's ready (#394, #387). Thanks @Michsior14.
+
+
+## 2023-02-24, version 6.4.0
+
+- Support transferable objects (#3, #374). Thanks @Michsior14.
+- Implement a new callback `onTerminate` at the worker side, which can be used
+  to clean up resources, and an option `workerTerminateTimeout` which forcefully 
+  terminates a worker if it doesn't finish in time (#353, #377). 
+  Thanks @Michsior14.
+- Pass `workerThreadOpts` to the `onTerminateWorker` callback (#376). 
+  Thanks @Michsior14.
+
+
+## 2022-11-07, version 6.3.1
+
+- Fix #318: debug ports not being released when terminating a pool.
+
+
+## 2022-10-24, version 6.3.0
+
+- Implement option `workerThreadOpts` to pass options to a worker of type 
+  `thread`, a `worker_thread` (#357, fixes #356). Thanks @galElmalah.
+
+## 2022-04-11, version 6.2.1
+
+- Fix #343: `.terminate()` sometimes throwing an exception.
+
+
+## 2022-01-15, version 6.2.0
+
+- Implement callbacks `onCreateWorker` and `onTerminateWorker`. Thanks @forty.
+- Fix #326: robustness fix when terminating a workerpool.
+
+
+## 2021-06-17, version 6.1.5
+
+- Fix v6.1.4 not being marked as latest anymore on npm due to bug fix
+  release v2.3.4.
+
+
 ## 2021-04-05, version 6.1.4
 
 - Fix terminating a pool throwing an error when used in the browser.
@@ -143,6 +191,11 @@ This may have impact on your project depending on your setup.
 
 - Enable usage in ES6 Webpack projects.
 - Dropped support for AMD module system.
+
+
+## 2021-06-17, version 2.3.4
+
+- Backport fix for Node.js 16, see #309. Thanks @mansona.
 
 
 ## 2018-09-12, version 2.3.3
